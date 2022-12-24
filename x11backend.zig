@@ -1,11 +1,12 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const img = @import("img");
 const x = @import("x");
 const common = @import("x11common.zig");
 const Memfd = x.Memfd;
 const ContiguousReadBuffer = x.ContiguousReadBuffer;
 const XY = @import("xy.zig").XY;
-const Image = @import("Image.zig");
+const Image = img.Image;
 
 pub const Ids = struct {
     base: u32,
@@ -62,8 +63,8 @@ pub const State = struct {
                 .parent_window_id = screen.root,
                 .depth = 0, // we don't care, just inherit from the parent
                 .x = 0, .y = 0,
-                .width = @intCast(u16, image.size.x),
-                .height = @intCast(u16, image.size.y),
+                .width = @intCast(u16, image.width),
+                .height = @intCast(u16, image.height),
                 .border_width = 0, // TODO: what is this?
                 .class = .input_output,
                 .visual_id = screen.root_visual,
@@ -164,7 +165,7 @@ pub const State = struct {
             try conn.send(&msg);
         }
 
-        const rgb32 = try allocator.alloc(u8, 4 * image.size.x * image.size.y);
+        const rgb32 = try allocator.alloc(u8, 4 * image.width * image.height);
         errdefer allocator.free(rgb32);
 
         convertImage(rgb32, image);
@@ -176,7 +177,10 @@ pub const State = struct {
             .max_request_len = @intCast(u18, conn.setup.fixed().max_request_len) * 4,
             .font_dims = font_dims,
             .buf = buf,
-            .image_size = image.size,
+            .image_size = .{
+                .x = @intCast(u32, image.width),
+                .y = @intCast(u32, image.height),
+            },
             .image_rgb32 = rgb32,
         };
     }
@@ -386,38 +390,43 @@ fn sendPutImage(
 }
 
 fn convertImage(dst_rgb32: []u8, image: Image) void {
-    switch (image.format) {
+    const bytes = image.rawBytes();
+    switch (image.pixelFormat()) {
         .rgb24 => {
             var src_off: usize = 0;
             var dst_off: usize = 0;
-            var y: u32 = 0;
-            while (y < image.size.y) : (y += 1) {
-                var col: u32 = 0;
-                while (col < image.size.x) : (col += 1) {
-                    dst_rgb32[dst_off + 0] = image.bytes[src_off + 2];
-                    dst_rgb32[dst_off + 1] = image.bytes[src_off + 1];
-                    dst_rgb32[dst_off + 2] = image.bytes[src_off + 0];
+            var y: usize = 0;
+            while (y < image.height) : (y += 1) {
+                var col: usize = 0;
+                while (col < image.width) : (col += 1) {
+                    dst_rgb32[dst_off + 0] = bytes[src_off + 2];
+                    dst_rgb32[dst_off + 1] = bytes[src_off + 1];
+                    dst_rgb32[dst_off + 2] = bytes[src_off + 0];
                     dst_rgb32[dst_off + 3] = 0;
                     dst_off += 4;
                     src_off += 3;
                 }
             }
         },
-        .rgb32 => {
+        .rgba32 => {
             var src_off: usize = 0;
             var dst_off: usize = 0;
-            var y: u32 = 0;
-            while (y < image.size.y) : (y += 1) {
-                var col: u32 = 0;
-                while (col < image.size.x) : (col += 1) {
-                    dst_rgb32[dst_off + 0] = image.bytes[src_off + 2];
-                    dst_rgb32[dst_off + 1] = image.bytes[src_off + 1];
-                    dst_rgb32[dst_off + 2] = image.bytes[src_off + 0];
+            var y: usize = 0;
+            while (y < image.height) : (y += 1) {
+                var col: usize = 0;
+                while (col < image.width) : (col += 1) {
+                    dst_rgb32[dst_off + 0] = bytes[src_off + 2];
+                    dst_rgb32[dst_off + 1] = bytes[src_off + 1];
+                    dst_rgb32[dst_off + 2] = bytes[src_off + 0];
                     dst_rgb32[dst_off + 3] = 0;
                     dst_off += 4;
                     src_off += 4;
                 }
             }
         },
+        else => std.debug.panic(
+            "x11 does not yet support pixel format {s}",
+            .{@tagName(image.pixelFormat())},
+        ),
     }
 }

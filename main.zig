@@ -3,7 +3,6 @@ const std = @import("std");
 const img = @import("img");
 
 const XY = @import("xy.zig").XY;
-const Image = @import("Image.zig");
 const x11backend = @import("x11backend.zig");
 
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -72,7 +71,7 @@ pub fn main() !u8 {
     // TODO: select the right backend
     var x11_state = try x11backend.State.init(
         arena.allocator(),
-        Image.init(image),
+        image,
     );
     defer x11_state.deinit();
 

@@ -21,8 +21,9 @@ pub const State = struct {
     screen: *x.Screen,
     ids: Ids,
     max_request_len: u18,
+    double_buf: x.DoubleBuffer,
+    buf: x.ContiguousReadBuffer,
     font_dims: FontDims,
-    buf: ContiguousReadBuffer,
 
     image_size: XY(u32),
     image_rgb32: []const u8,
@@ -135,11 +136,13 @@ pub const State = struct {
             try conn.send(&msg);
         }
 
-        const buf_memfd = try Memfd.init("ZigX11DoubleBuffer");
-        // no need to deinit
-        const buffer_capacity = std.mem.alignForward(1000, std.mem.page_size);
-        std.log.info("buffer capacity is {}", .{buffer_capacity});
-        var buf = ContiguousReadBuffer { .double_buffer_ptr = try buf_memfd.toDoubleBuffer(buffer_capacity), .half_size = buffer_capacity };
+        const double_buf = try x.DoubleBuffer.init(
+            std.mem.alignForward(1000, std.mem.page_size),
+            .{ .memfd_name = "ZigX11DoubleBuffer" },
+        );
+        errdefer double_buf.deinit();
+        std.log.info("read buffer capacity is {}", .{double_buf.half_len});
+        var buf = double_buf.contiguousReadBuffer();
 
         const font_dims: FontDims = blk: {
             _ = try x.readOneMsg(conn.reader(), @alignCast(4, buf.nextReadBuffer()));
@@ -175,8 +178,9 @@ pub const State = struct {
             .screen = screen,
             .ids = ids,
             .max_request_len = @intCast(u18, conn.setup.fixed().max_request_len) * 4,
-            .font_dims = font_dims,
+            .double_buf = double_buf,
             .buf = buf,
+            .font_dims = font_dims,
             .image_size = .{
                 .x = @intCast(u32, image.width),
                 .y = @intCast(u32, image.height),
@@ -185,6 +189,7 @@ pub const State = struct {
         };
     }
     pub fn deinit(self: *State) void {
+        self.double_buf.deinit();
         self.allocator.free(self.image_rgb32);
         std.os.shutdown(self.conn.sock, .both) catch {};
         self.conn.setup.deinit(self.allocator);
@@ -195,7 +200,7 @@ pub const State = struct {
             {
                 const recv_buf = self.buf.nextReadBuffer();
                 if (recv_buf.len == 0) {
-                    std.log.err("buffer size {} not big enough!", .{self.buf.half_size});
+                    std.log.err("buffer size {} not big enough!", .{self.buf.half_len});
                     return error.X11BufferTooSmall;
                 }
                 const len = try std.os.recv(self.conn.sock, recv_buf, 0);

@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const img = @import("img");
 
 const XY = @import("xy.zig").XY;
 const Image = @import("Image.zig");
@@ -64,13 +65,14 @@ pub fn main() !u8 {
         break :blk try file.readToEndAlloc(arena.allocator(), std.math.maxInt(usize));
     };
 
-    const img = Image.initPpm(content) catch |err|
-        fatal("failed to parse {s} as a ppm file with {s}", .{filename, @errorName(err)});
+    var image = img.Image.fromMemory(arena.allocator(), content) catch |err|
+        fatal("failed load image {s} with {s}", .{filename, @errorName(err)});
+    defer image.deinit();
     
     // TODO: select the right backend
     var x11_state = try x11backend.State.init(
         arena.allocator(),
-        img,
+        Image.init(image),
     );
     defer x11_state.deinit();
 

@@ -8,11 +8,20 @@ pub fn build(b: *std.build.Builder) void {
     const zigx_repo = GitRepoStep.create(b, .{
         .url = "https://github.com/marler8997/zigx",
         .branch = null,
-        .sha = "e7572d24ac22e0d00128649791196d3c25d0d6f1",
+        .sha = "589ef0ca6ef9ef9cf7edaad4213e7c062cda9e6a",
         .fetch_enabled = true,
     });
-    
+
+    const zigimg_repo = GitRepoStep.create(b, .{
+        .url = "https://github.com/zigimg/zigimg",
+        .branch = null,
+        .sha = "5e8e5687ce1edd7dd1040c0580ec0731bcfbd793",
+        .fetch_enabled = true,
+    });
+
     const exe = b.addExecutable("image-viewer", "main.zig");
+    exe.step.dependOn(&zigimg_repo.step);
+    exe.addPackagePath("img", b.pathJoin(&.{zigimg_repo.path, "zigimg.zig"}));
     exe.step.dependOn(&zigx_repo.step);
     exe.addPackagePath("x", b.pathJoin(&.{zigx_repo.path, "x.zig"}));
     exe.setTarget(target);

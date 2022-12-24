@@ -2,33 +2,28 @@ const Image = @This();
 
 const std = @import("std");
 const XY = @import("xy.zig").XY;
+const img = @import("img");
 
 pub const Format = enum {
     rgb24,
+    rgb32,
 };
 
 size: XY(u32),
 bytes: []const u8,
 format: Format,
 
-pub fn initPpm(file_content: []const u8) !Image {
-    if (!std.mem.startsWith(u8, file_content, "P6"))
-        return error.InvalidPpmBadMagic;
-    const after_magic = file_content[2..];
-    var it = std.mem.tokenize(u8, after_magic, " \t\r\n");
-    const width_str = it.next() orelse return error.InvalidPpmTooSmall;
-    const width = std.fmt.parseInt(u32, width_str, 10) catch
-        return error.InvalidPpmBadWidth;
-    const height_str = it.next() orelse return error.InvalidPpmTooSmall;
-    const height = std.fmt.parseInt(u32, height_str, 10) catch
-        return error.InvalidPpmBadHeight;
-    const maxcolor_str = it.next() orelse return error.InvalidPpmTooSmall;
-    const maxcolor = std.fmt.parseInt(u32, maxcolor_str, 10) catch
-        return error.InvalidPpmBadMaxcolor;
-    if (maxcolor != 255) return error.UnsupportePpmMaxColor;
+pub fn init(image: img.Image) Image {
     return .{
-        .size = .{ .x = width, .y = height },
-        .bytes = after_magic[it.index + 1..],
-        .format = .rgb24,
+        .size = .{
+            .x = @intCast(u32, image.width),
+            .y = @intCast(u32, image.height),
+        },
+        .bytes = image.rawBytes(),
+        .format = switch (image.pixelFormat()) {
+            .rgb24 => .rgb24,
+            .rgba32 => .rgb32,
+            else => std.debug.panic("TODO: support pixel format {s}", .{@tagName(image.pixelFormat())}),
+        },
     };
 }

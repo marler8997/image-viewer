@@ -167,25 +167,7 @@ pub const State = struct {
         const rgb32 = try allocator.alloc(u8, 4 * image.size.x * image.size.y);
         errdefer allocator.free(rgb32);
 
-        switch (image.format) {
-            .rgb24 => {
-                var src_off: usize = 0;
-                var dst_off: usize = 0;
-                var y: u32 = 0;
-                while (y < image.size.y) : (y += 1) {
-                    var col: u32 = 0;
-                    while (col < image.size.x) : (col += 1) {
-                        rgb32[dst_off + 0] = image.bytes[src_off + 2];
-                        rgb32[dst_off + 1] = image.bytes[src_off + 1];
-                        rgb32[dst_off + 2] = image.bytes[src_off + 0];
-                        rgb32[dst_off + 3] = 0;
-                        dst_off += 4;
-                        src_off += 3;
-                    }
-                }
-            },
-        }
-        
+        convertImage(rgb32, image);
         return .{
             .allocator = allocator,
             .conn = conn,
@@ -400,5 +382,42 @@ fn sendPutImage(
             // TODO: need to call write multiple times
             std.debug.panic("TODO: writev {} only wrote {}", .{expected_msg_len, len});
         }
+    }
+}
+
+fn convertImage(dst_rgb32: []u8, image: Image) void {
+    switch (image.format) {
+        .rgb24 => {
+            var src_off: usize = 0;
+            var dst_off: usize = 0;
+            var y: u32 = 0;
+            while (y < image.size.y) : (y += 1) {
+                var col: u32 = 0;
+                while (col < image.size.x) : (col += 1) {
+                    dst_rgb32[dst_off + 0] = image.bytes[src_off + 2];
+                    dst_rgb32[dst_off + 1] = image.bytes[src_off + 1];
+                    dst_rgb32[dst_off + 2] = image.bytes[src_off + 0];
+                    dst_rgb32[dst_off + 3] = 0;
+                    dst_off += 4;
+                    src_off += 3;
+                }
+            }
+        },
+        .rgb32 => {
+            var src_off: usize = 0;
+            var dst_off: usize = 0;
+            var y: u32 = 0;
+            while (y < image.size.y) : (y += 1) {
+                var col: u32 = 0;
+                while (col < image.size.x) : (col += 1) {
+                    dst_rgb32[dst_off + 0] = image.bytes[src_off + 2];
+                    dst_rgb32[dst_off + 1] = image.bytes[src_off + 1];
+                    dst_rgb32[dst_off + 2] = image.bytes[src_off + 0];
+                    dst_rgb32[dst_off + 3] = 0;
+                    dst_off += 4;
+                    src_off += 4;
+                }
+            }
+        },
     }
 }

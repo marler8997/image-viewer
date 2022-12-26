@@ -5,10 +5,23 @@ pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
+    const is_windows = target.getOs().tag == .windows;
+    const enable_x11_backend = blk: {
+        if (b.option(bool, "x11", "enable the x11 backend")) |opt| break :blk opt;
+        break :blk true;
+    };
+
     const zigx_repo = GitRepoStep.create(b, .{
         .url = "https://github.com/marler8997/zigx",
         .branch = null,
         .sha = "fc679932c08bd6d957270a9462aec97c8fced01f",
+        .fetch_enabled = true,
+    });
+
+    const zigwin32_repo = GitRepoStep.create(b, .{
+        .url = "https://github.com/marlersoft/zigwin32",
+        .branch = "15.0.2-preview",
+        .sha = "56cf335ddcdb72a6d7059c5b6f131263830b3eca",
         .fetch_enabled = true,
     });
 
@@ -19,11 +32,25 @@ pub fn build(b: *std.build.Builder) void {
         .fetch_enabled = true,
     });
 
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "enable_x11_backend", enable_x11_backend);
+
+    //const exe = b.addExecutable("image-viewer", if (is_windows) "win32main.zig" else "main.zig");
     const exe = b.addExecutable("image-viewer", "main.zig");
+    exe.addOptions("build_options", build_options);
+
     exe.step.dependOn(&zigimg_repo.step);
     exe.addPackagePath("img", b.pathJoin(&.{zigimg_repo.path, "zigimg.zig"}));
-    exe.step.dependOn(&zigx_repo.step);
-    exe.addPackagePath("x", b.pathJoin(&.{zigx_repo.path, "x.zig"}));
+    if (enable_x11_backend) {
+        exe.step.dependOn(&zigx_repo.step);
+        exe.addPackagePath("x", b.pathJoin(&.{zigx_repo.path, "x.zig"}));
+    }
+    if (is_windows) {
+        exe.subsystem = .Windows;
+        exe.step.dependOn(&zigwin32_repo.step);
+        exe.addPackagePath("win32", b.pathJoin(&.{zigwin32_repo.path, "win32.zig"}));
+    }
+
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();

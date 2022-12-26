@@ -1,9 +1,9 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const img = @import("img");
+const convert = @import("convert.zig");
 const x = @import("x");
 const common = @import("x11common.zig");
-const Memfd = x.Memfd;
 const ContiguousReadBuffer = x.ContiguousReadBuffer;
 const XY = @import("xy.zig").XY;
 const Image = img.Image;
@@ -15,7 +15,12 @@ pub const Ids = struct {
     pub fn fg_gc(self: Ids) u32 { return self.base + 2; }
 };
 
-pub fn go(allocator: std.mem.Allocator, image: Image) !void {
+pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
+    const image = opt_image orelse {
+        std.log.err("x11backend requires an image right now", .{});
+        std.os.exit(0xff);
+    };
+
     try x.wsaStartup();
 
     const conn = try common.connect(allocator);
@@ -163,7 +168,7 @@ pub fn go(allocator: std.mem.Allocator, image: Image) !void {
 
     const image_rgb32 = try allocator.alloc(u8, 4 * image.width * image.height);
     defer allocator.free(image_rgb32);
-    convertImage(image_rgb32, image);
+    convert.toRgb32(image_rgb32, image);
 
     while (true) {
         {
@@ -369,47 +374,5 @@ fn sendPutImage(
             // TODO: need to call write multiple times
             std.debug.panic("TODO: writev {} only wrote {}", .{expected_msg_len, len});
         }
-    }
-}
-
-fn convertImage(dst_rgb32: []u8, image: Image) void {
-    const bytes = image.rawBytes();
-    switch (image.pixelFormat()) {
-        .rgb24 => {
-            var src_off: usize = 0;
-            var dst_off: usize = 0;
-            var y: usize = 0;
-            while (y < image.height) : (y += 1) {
-                var col: usize = 0;
-                while (col < image.width) : (col += 1) {
-                    dst_rgb32[dst_off + 0] = bytes[src_off + 2];
-                    dst_rgb32[dst_off + 1] = bytes[src_off + 1];
-                    dst_rgb32[dst_off + 2] = bytes[src_off + 0];
-                    dst_rgb32[dst_off + 3] = 0;
-                    dst_off += 4;
-                    src_off += 3;
-                }
-            }
-        },
-        .rgba32 => {
-            var src_off: usize = 0;
-            var dst_off: usize = 0;
-            var y: usize = 0;
-            while (y < image.height) : (y += 1) {
-                var col: usize = 0;
-                while (col < image.width) : (col += 1) {
-                    dst_rgb32[dst_off + 0] = bytes[src_off + 2];
-                    dst_rgb32[dst_off + 1] = bytes[src_off + 1];
-                    dst_rgb32[dst_off + 2] = bytes[src_off + 0];
-                    dst_rgb32[dst_off + 3] = 0;
-                    dst_off += 4;
-                    src_off += 4;
-                }
-            }
-        },
-        else => std.debug.panic(
-            "x11 does not yet support pixel format {s}",
-            .{@tagName(image.pixelFormat())},
-        ),
     }
 }

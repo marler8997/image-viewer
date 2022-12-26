@@ -15,6 +15,10 @@ pub const Ids = struct {
     pub fn fg_gc(self: Ids) u32 { return self.base + 2; }
 };
 
+pub fn mainInit() !void {
+    try x.wsaStartup();
+}
+
 pub const State = struct {
     allocator: std.mem.Allocator,
     conn: common.ConnectResult,
@@ -203,7 +207,7 @@ pub const State = struct {
                     std.log.err("buffer size {} not big enough!", .{self.buf.half_len});
                     return error.X11BufferTooSmall;
                 }
-                const len = try std.os.recv(self.conn.sock, recv_buf, 0);
+                const len = try x.readSock(self.conn.sock, recv_buf, 0);
                 if (len == 0) {
                     std.log.info("X server connection closed", .{});
                     return;
@@ -380,7 +384,14 @@ fn sendPutImage(
         .depth = 24,
     });
     if (builtin.os.tag == .windows) {
-        @compileError("writev not implemented on windows");
+        {
+            const sent = try x.writeSock(sock, &msg, 0);
+            std.debug.assert(sent == msg.len);
+        }
+        {
+            const sent = try x.writeSock(sock, data.nativeSlice(), 0);
+            std.debug.assert(sent == data.len);
+        }
     } else {
         std.log.info("message len is {}", .{msg.len + data.len});
         const len = try std.os.writev(sock, &[_]std.os.iovec_const {

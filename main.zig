@@ -69,6 +69,7 @@ pub fn main() !u8 {
     defer image.deinit();
     
     // TODO: select the right backend
+    try x11backend.mainInit();
     var x11_state = try x11backend.State.init(
         arena.allocator(),
         image,

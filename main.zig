@@ -69,17 +69,6 @@ pub fn main() !u8 {
     defer image.deinit();
     
     // TODO: select the right backend
-    try x11backend.mainInit();
-    var x11_state = try x11backend.State.init(
-        arena.allocator(),
-        image,
-    );
-    defer x11_state.deinit();
-
-    //const 
-    //std.log.info("maximum request length is {} bytes", .{max_request_len});
-    
-    try x11_state.windowLoop();
+    try x11backend.go(arena.allocator(), image);
     return 0;
 }
-

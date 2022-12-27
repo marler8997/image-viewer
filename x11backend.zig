@@ -215,10 +215,6 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     const put_image_line_msg = try allocator.alloc(u8, x.put_image.data_offset + image_stride);
     defer allocator.free(put_image_line_msg);
 
-    const image_rgb32 = try allocator.alloc(u8, 4 * image.width * image.height);
-    defer allocator.free(image_rgb32);
-    convert.toRgb32(image_rgb32, image);
-
     while (true) {
         {
             const recv_buf = buf.nextReadBuffer();
@@ -283,7 +279,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
                         ids,
                         image_format,
                         font_dims,
-                        image_rgb32,
+                        image,
                         put_image_line_msg,
                     );
                 },
@@ -312,13 +308,15 @@ fn render(
     ids: Ids,
     image_format: XImageFormat,
     font_dims: FontDims,
-    image_rgb32: []const u8,
+    image: Image,
     put_image_line_msg: []u8,
 ) !void {
     _ = font_dims;
     // NOTE: for now we only support sending images whose width can fit in a u16
     const width_u16 = std.math.cast(u16, size.x) orelse return error.ImageTooWide;
-    const src_stride = size.x * 4;
+
+    var it = image.iterator();
+
     var line_index: usize = 0;
     while (line_index < size.y) : (line_index += 1) {
         try sendLine(
@@ -330,7 +328,7 @@ fn render(
             // TODO: is this cast ok?
             @intCast(i16, line_index),
             width_u16,
-            image_rgb32[src_stride * line_index..],
+            &it,
             put_image_line_msg,
         );
     }
@@ -344,7 +342,7 @@ fn sendLine(
     x_loc: i16,
     y: i16,
     width: u16,
-    src_data: []const u8,
+    pixel_it: *img.color.PixelStorageIterator,
     msg: []u8,
 ) !void {
     const dst_bytes_per_pixel = dst_image_format.bits_per_pixel / 8;
@@ -369,7 +367,11 @@ fn sendLine(
         var msg_off: usize = x.put_image.data_offset;
         var col: u16 = 0;
         while (col < width) : (col += 1) {
-            const color = std.mem.readIntLittle(u24, src_data[4 * col..][0 .. 3]);
+            const color_f32 = pixel_it.next().?;
+            const r = @floatToInt(u24, color_f32.r / 1.0 * 0xff) & 0xff;
+            const g = @floatToInt(u24, color_f32.g / 1.0 * 0xff) & 0xff;
+            const b = @floatToInt(u24, color_f32.b / 1.0 * 0xff) & 0xff;
+            const color = (r << 16) | (g << 8) | (b << 0);
 
             switch (dst_image_format.depth) {
                 16 => std.mem.writeInt(

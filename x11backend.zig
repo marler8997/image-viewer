@@ -8,12 +8,43 @@ const ContiguousReadBuffer = x.ContiguousReadBuffer;
 const XY = @import("xy.zig").XY;
 const Image = img.Image;
 
+const Endian = std.builtin.Endian;
+
 pub const Ids = struct {
     base: u32,
     pub fn window(self: Ids) u32 { return self.base; }
     pub fn bg_gc(self: Ids) u32 { return self.base + 1; }
     pub fn fg_gc(self: Ids) u32 { return self.base + 2; }
 };
+
+const XImageFormat = struct {
+    endian: Endian,
+    depth: u8,
+    bits_per_pixel: u8,
+    scanline_pad: u8,
+};
+fn getXImageFormat(
+    endian: Endian,
+    formats: []const align(4) x.Format,
+    root_depth: u8,
+) !XImageFormat {
+    var opt_match_index: ?usize = null;
+    for (formats) |format, i| {
+        if (format.depth == root_depth) {
+            if (opt_match_index) |_|
+                return error.MultiplePixmapFormatsSameDepth;
+            opt_match_index = i;
+        }
+    }
+    const match_index = opt_match_index orelse
+        return error.MissingPixmapFormat;
+    return XImageFormat{
+        .endian = endian,
+        .depth = root_depth,
+        .bits_per_pixel = formats[match_index].bits_per_pixel,
+        .scanline_pad = formats[match_index].scanline_pad,
+    };
+}
 
 pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     const image = opt_image orelse {
@@ -33,6 +64,8 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     inline for (@typeInfo(@TypeOf(fixed.*)).Struct.fields) |field| {
         std.log.debug("{s}: {any}", .{field.name, @field(fixed, field.name)});
     }
+    const ids = Ids{ .base = conn.setup.fixed().resource_id_base };
+    const max_request_len = @intCast(u18, conn.setup.fixed().max_request_len) * 4;
     std.log.debug("vendor: {s}", .{try conn.setup.getVendorSlice(fixed.vendor_len)});
     const format_list_offset = x.ConnectSetup.getFormatListOffset(fixed.vendor_len);
     const format_list_limit = x.ConnectSetup.getFormatListLimit(format_list_offset, fixed.format_count);
@@ -41,14 +74,23 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     for (formats) |format, i| {
         std.log.debug("format[{}] depth={:3} bpp={:3} scanpad={:3}", .{i, format.depth, format.bits_per_pixel, format.scanline_pad});
     }
-    var screen = conn.setup.getFirstScreenPtr(format_list_limit);
+    const screen = conn.setup.getFirstScreenPtr(format_list_limit);
     inline for (@typeInfo(@TypeOf(screen.*)).Struct.fields) |field| {
         std.log.debug("SCREEN 0| {s}: {any}", .{field.name, @field(screen, field.name)});
     }
-    const max_request_len = @intCast(u18, conn.setup.fixed().max_request_len) * 4;
+    const image_format = blk: {
+        const image_endian: Endian = switch (fixed.image_byte_order) {
+            .lsb_first => .Little,
+            .msb_first => .Big,
+            else => |order| {
+                std.log.err("unknown image-byte-order {}", .{order});
+                return 0xff;
+            },
+        };
+        break :blk getXImageFormat(image_endian, formats, screen.root_depth);
+    };
 
     // TODO: maybe need to call conn.setup.verify or something?
-    const ids = Ids{ .base = conn.setup.fixed().resource_id_base };
 
     // TODO: if image is too big, create a window that's smaller than the image
     const image_size_u16 = XY(u16){
@@ -231,6 +273,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
                     try render(
                         .{ .x = image.width, .y = image.height},
                         conn.sock,
+                        image_format,
                         max_request_len,
                         ids,
                         font_dims,
@@ -259,8 +302,9 @@ const FontDims = struct {
 fn render(
     size: XY(usize),
     sock: std.os.socket_t,
-    max_request_len: u18,
     ids: Ids,
+    max_request_len: u18,
+    image_format: XImageFormat,
     font_dims: FontDims,
     image_rgb32: []const u8,
 ) !void {
@@ -281,12 +325,13 @@ fn render(
 fn sendImage(
     sock: std.os.socket_t,
     max_request_len: u18,
+    image_format: XImageFormat,
     drawable_id: u32,
     gc_id: u32,
     x_loc: i16,
     y: i16,
     size: XY(usize),
-    stride: usize,
+    src_stride: usize,
     data: []const u8,
 ) !void {
     // NOTE: for now we only support sending images whose width can fit in a u16
@@ -295,12 +340,18 @@ fn sendImage(
     std.debug.assert(size.y > 0);
     const max_image_len = max_request_len - x.put_image.data_offset;
 
+    const bytes_per_pixel = image_format.bits_per_pixel / 8;
+    const scanline_len = std.mem.alignForward(
+        byte_per_pixel * width,
+        image_format.scanline_pad / 8,
+    );
+
     // TODO: is this division going to hurt performance?
-    const max_lines_per_msg = @divTrunc(max_image_len, stride);
+    const max_lines_per_msg = @divTrunc(max_image_len, scanline_len);
     if (max_lines_per_msg == 0) {
         // in this case we would have to split up each line of the image as well, but
         // this is *unlikely* to ever happen right?
-        std.debug.panic("TODO: 1 line is to long!?! max_image_len={}, stride={}", .{max_image_len, stride});
+        std.debug.panic("TODO: 1 line is to long!?! max_image_len={}, scanline_len={}", .{max_image_len, scanline_len});
     }
 
     var lines_sent: usize = 0;
@@ -308,7 +359,7 @@ fn sendImage(
     while (true) {
         const lines_remaining = size.y - lines_sent;
         var next_msg_line_count = std.math.min(lines_remaining, max_lines_per_msg);
-        var data_len = stride * next_msg_line_count;
+        var data_len = src_stride * next_msg_line_count;
         try sendPutImage(
             sock,
             drawable_id,

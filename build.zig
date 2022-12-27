@@ -14,7 +14,7 @@ pub fn build(b: *std.build.Builder) void {
     const zigx_repo = GitRepoStep.create(b, .{
         .url = "https://github.com/marler8997/zigx",
         .branch = null,
-        .sha = "fc679932c08bd6d957270a9462aec97c8fced01f",
+        .sha = "b91780352633fc6e2674c28c3efb08ad00afefe6",
         .fetch_enabled = true,
     });
 

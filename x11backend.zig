@@ -65,7 +65,6 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
         std.log.debug("{s}: {any}", .{field.name, @field(fixed, field.name)});
     }
     const ids = Ids{ .base = conn.setup.fixed().resource_id_base };
-    const max_request_len = @intCast(u18, conn.setup.fixed().max_request_len) * 4;
     std.log.debug("vendor: {s}", .{try conn.setup.getVendorSlice(fixed.vendor_len)});
     const format_list_offset = x.ConnectSetup.getFormatListOffset(fixed.vendor_len);
     const format_list_limit = x.ConnectSetup.getFormatListLimit(format_list_offset, fixed.format_count);
@@ -84,10 +83,10 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
             .msb_first => .Big,
             else => |order| {
                 std.log.err("unknown image-byte-order {}", .{order});
-                return 0xff;
+                return error.X11UnexpectedReply;
             },
         };
-        break :blk getXImageFormat(image_endian, formats, screen.root_depth);
+        break :blk try getXImageFormat(image_endian, formats, screen.root_depth);
     };
 
     // TODO: maybe need to call conn.setup.verify or something?
@@ -208,6 +207,14 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
         try conn.send(&msg);
     }
 
+    const image_bytes_per_pixel = image_format.bits_per_pixel / 8;
+    const image_stride = std.mem.alignForward(
+        image_bytes_per_pixel * image.width,
+        image_format.scanline_pad / 8,
+    );
+    const put_image_line_msg = try allocator.alloc(u8, x.put_image.data_offset + image_stride);
+    defer allocator.free(put_image_line_msg);
+
     const image_rgb32 = try allocator.alloc(u8, 4 * image.width * image.height);
     defer allocator.free(image_rgb32);
     convert.toRgb32(image_rgb32, image);
@@ -273,11 +280,11 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
                     try render(
                         .{ .x = image.width, .y = image.height},
                         conn.sock,
-                        image_format,
-                        max_request_len,
                         ids,
+                        image_format,
                         font_dims,
                         image_rgb32,
+                        put_image_line_msg,
                     );
                 },
                 .mapping_notify => |msg| {
@@ -303,127 +310,92 @@ fn render(
     size: XY(usize),
     sock: std.os.socket_t,
     ids: Ids,
-    max_request_len: u18,
     image_format: XImageFormat,
     font_dims: FontDims,
     image_rgb32: []const u8,
+    put_image_line_msg: []u8,
 ) !void {
     _ = font_dims;
-    const stride = 4 * size.x;
-    try sendImage(
-        sock,
-        max_request_len,
-        ids.window(),
-        ids.fg_gc(),
-        0, 0,
-        size,
-        stride,
-        image_rgb32,
-    );
-}
-
-fn sendImage(
-    sock: std.os.socket_t,
-    max_request_len: u18,
-    image_format: XImageFormat,
-    drawable_id: u32,
-    gc_id: u32,
-    x_loc: i16,
-    y: i16,
-    size: XY(usize),
-    src_stride: usize,
-    data: []const u8,
-) !void {
     // NOTE: for now we only support sending images whose width can fit in a u16
     const width_u16 = std.math.cast(u16, size.x) orelse return error.ImageTooWide;
-
-    std.debug.assert(size.y > 0);
-    const max_image_len = max_request_len - x.put_image.data_offset;
-
-    const bytes_per_pixel = image_format.bits_per_pixel / 8;
-    const scanline_len = std.mem.alignForward(
-        byte_per_pixel * width,
-        image_format.scanline_pad / 8,
-    );
-
-    // TODO: is this division going to hurt performance?
-    const max_lines_per_msg = @divTrunc(max_image_len, scanline_len);
-    if (max_lines_per_msg == 0) {
-        // in this case we would have to split up each line of the image as well, but
-        // this is *unlikely* to ever happen right?
-        std.debug.panic("TODO: 1 line is to long!?! max_image_len={}, scanline_len={}", .{max_image_len, scanline_len});
-    }
-
-    var lines_sent: usize = 0;
-    var data_offset: usize = 0;
-    while (true) {
-        const lines_remaining = size.y - lines_sent;
-        var next_msg_line_count = std.math.min(lines_remaining, max_lines_per_msg);
-        var data_len = src_stride * next_msg_line_count;
-        try sendPutImage(
+    const src_stride = size.x * 4;
+    var line_index: usize = 0;
+    while (line_index < size.y) : (line_index += 1) {
+        try sendLine(
             sock,
-            drawable_id,
-            gc_id,
-            x_loc,
+            image_format,
+            ids.window(),
+            ids.fg_gc(),
+            0,
             // TODO: is this cast ok?
-            y + @intCast(i16, lines_sent),
+            @intCast(i16, line_index),
             width_u16,
-            @intCast(u16, next_msg_line_count),
-            x.Slice(u18, [*]const u8) {
-                .ptr = data.ptr + data_offset,
-                .len = @intCast(u18, data_len),
-            },
+            image_rgb32[src_stride * line_index..],
+            put_image_line_msg,
         );
-        lines_sent += next_msg_line_count;
-        if (lines_sent == size.y) break;
-        data_offset += data_len;
     }
 }
 
-fn sendPutImage(
+fn sendLine(
     sock: std.os.socket_t,
+    dst_image_format: XImageFormat,
     drawable_id: u32,
     gc_id: u32,
     x_loc: i16,
     y: i16,
     width: u16,
-    height: u16,
-    data: x.Slice(u18, [*]const u8),
+    src_data: []const u8,
+    msg: []u8,
 ) !void {
-    var msg: [x.put_image.data_offset]u8 = undefined;
-    const expected_msg_len = x.put_image.data_offset + data.len;
-    std.debug.assert(expected_msg_len == x.put_image.getLen(data.len));
-    x.put_image.serializeNoDataCopy(&msg, data.len, .{
+    const dst_bytes_per_pixel = dst_image_format.bits_per_pixel / 8;
+    const dst_stride = @intCast(u18, std.mem.alignForward(
+        dst_bytes_per_pixel * width,
+        dst_image_format.scanline_pad / 8,
+    ));
+    std.debug.assert(msg.len == x.put_image.getLen(dst_stride));
+    x.put_image.serializeNoDataCopy(msg.ptr, dst_stride, .{
         .format = .z_pixmap,
         .drawable_id = drawable_id,
         .gc_id = gc_id,
         .width = width,
-        .height = height,
+        .height = 1,
         .x = x_loc,
         .y = y,
         .left_pad = 0,
-        // hardcoded to my machine with:
-        //     depth= 24 bpp= 32 scanpad= 32
-        .depth = 24,
+        .depth = dst_image_format.depth,
     });
-    if (builtin.os.tag == .windows) {
-        {
-            const sent = try x.writeSock(sock, &msg, 0);
-            std.debug.assert(sent == msg.len);
-        }
-        {
-            const sent = try x.writeSock(sock, data.nativeSlice(), 0);
-            std.debug.assert(sent == data.len);
-        }
-    } else {
-        std.log.info("message len is {}", .{msg.len + data.len});
-        const len = try std.os.writev(sock, &[_]std.os.iovec_const {
-            .{ .iov_base = &msg, .iov_len = msg.len },
-            .{ .iov_base = data.ptr, .iov_len = data.len },
-        });
-        if (len != expected_msg_len) {
-            // TODO: need to call write multiple times
-            std.debug.panic("TODO: writev {} only wrote {}", .{expected_msg_len, len});
+
+    {
+        var msg_off: usize = x.put_image.data_offset;
+        var col: u16 = 0;
+        while (col < width) : (col += 1) {
+            const color = std.mem.readIntLittle(u24, src_data[4 * col..][0 .. 3]);
+
+            switch (dst_image_format.depth) {
+                16 => std.mem.writeInt(
+                    u16,
+                    msg[msg_off..][0 .. 2],
+                    x.rgb24To16(color),
+                    dst_image_format.endian,
+                ),
+                24 => std.mem.writeInt(
+                    u24,
+                    msg[msg_off..][0 .. 3],
+                    color,
+                    dst_image_format.endian,
+                ),
+                32 => std.mem.writeInt(
+                    u32,
+                    msg[msg_off..][0 .. 4],
+                    color,
+                    dst_image_format.endian,
+                ),
+                else => std.debug.panic("TODO: implement image depth {}", .{dst_image_format.depth}),
+            }
+            msg_off += dst_bytes_per_pixel;
         }
     }
+
+    const len = try x.writeSock(sock, msg, 0);
+    std.debug.assert(len == msg.len);
 }

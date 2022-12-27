@@ -13,8 +13,8 @@ const Endian = std.builtin.Endian;
 pub const Ids = struct {
     base: u32,
     pub fn window(self: Ids) u32 { return self.base; }
-    pub fn bg_gc(self: Ids) u32 { return self.base + 1; }
-    pub fn fg_gc(self: Ids) u32 { return self.base + 2; }
+    pub fn fg_gc(self: Ids) u32 { return self.base + 1; }
+    pub fn pixmap(self: Ids) u32 { return self.base + 2; }
 };
 
 const XImageFormat = struct {
@@ -110,7 +110,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
             .visual_id = screen.root_visual,
             }, .{
             //            .bg_pixmap = .copy_from_parent,
-            .bg_pixel = 0xaabbccdd,
+            .bg_pixel = x.rgb24To(0xbbccdd, screen.root_depth),
             //            //.border_pixmap =
             //            .border_pixel = 0x01fa8ec9,
             //            .bit_gravity = .north_west,
@@ -147,21 +147,13 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     {
         var msg_buf: [x.create_gc.max_len]u8 = undefined;
         const len = x.create_gc.serialize(&msg_buf, .{
-            .gc_id = ids.bg_gc(),
-            .drawable_id = screen.root,
-            }, .{
-            .foreground = screen.black_pixel,
-        });
-        try conn.send(msg_buf[0..len]);
-    }
-    {
-        var msg_buf: [x.create_gc.max_len]u8 = undefined;
-        const len = x.create_gc.serialize(&msg_buf, .{
             .gc_id = ids.fg_gc(),
             .drawable_id = screen.root,
             }, .{
             .background = screen.black_pixel,
-            .foreground = 0xffaadd,
+            .foreground = x.rgb24To(0xffaadd, screen.root_depth),
+            // prevent NoExposure events when we CopyArea
+            .graphics_exposures = false,
         });
         try conn.send(msg_buf[0..len]);
     }
@@ -201,19 +193,54 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
             },
         }
     };
+
+    // render image to pixmap
+    // NOTE: if image is too big (width/height can't fit in u16), we will need
+    //       mulitple pixmaps
+    {
+        var msg: [x.create_pixmap.len]u8 = undefined;
+        x.create_pixmap.serialize(&msg, .{
+            .id = ids.pixmap(),
+            .drawable_id = ids.window(),
+            .depth = image_format.depth,
+            .width = image_size_u16.x,
+            .height = image_size_u16.y,
+        });
+        try conn.send(&msg);
+    }
+
+    {
+        const image_bytes_per_pixel = image_format.bits_per_pixel / 8;
+        const image_stride = std.mem.alignForward(
+            image_bytes_per_pixel * image.width,
+            image_format.scanline_pad / 8,
+        );
+        const put_image_line_msg = try allocator.alloc(u8, x.put_image.data_offset + image_stride);
+        defer allocator.free(put_image_line_msg);
+
+        var it = image.iterator();
+        var line_index: usize = 0;
+        while (line_index < image_size_u16.y) : (line_index += 1) {
+            try sendLine(
+                conn.sock,
+                image_format,
+                ids.pixmap(),
+                ids.fg_gc(),
+                0,
+                // TODO: is this cast ok?
+                @intCast(i16, line_index),
+                image_size_u16.x,
+                &it,
+                put_image_line_msg,
+            );
+        }
+    }
+
     {
         var msg: [x.map_window.len]u8 = undefined;
         x.map_window.serialize(&msg, ids.window());
         try conn.send(&msg);
     }
-
-    const image_bytes_per_pixel = image_format.bits_per_pixel / 8;
-    const image_stride = std.mem.alignForward(
-        image_bytes_per_pixel * image.width,
-        image_format.scanline_pad / 8,
-    );
-    const put_image_line_msg = try allocator.alloc(u8, x.put_image.data_offset + image_stride);
-    defer allocator.free(put_image_line_msg);
 
     while (true) {
         {
@@ -274,18 +301,16 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
                 .expose => |msg| {
                     std.log.info("expose: {}", .{msg});
                     try render(
-                        .{ .x = image.width, .y = image.height},
                         conn.sock,
                         ids,
-                        image_format,
                         font_dims,
-                        image,
-                        put_image_line_msg,
+                        image_size_u16,
                     );
                 },
                 .mapping_notify => |msg| {
                     std.log.info("mapping_notify: {}", .{msg});
                 },
+                .no_exposure => |msg| std.debug.panic("unexpected {}", .{msg}),
                 .unhandled => |msg| {
                     std.log.info("todo: server msg {}", .{msg});
                     return error.UnhandledServerMsg;
@@ -303,34 +328,26 @@ const FontDims = struct {
 };
 
 fn render(
-    size: XY(usize),
     sock: std.os.socket_t,
     ids: Ids,
-    image_format: XImageFormat,
     font_dims: FontDims,
-    image: Image,
-    put_image_line_msg: []u8,
+    image_size: XY(u16),
 ) !void {
     _ = font_dims;
-    // NOTE: for now we only support sending images whose width can fit in a u16
-    const width_u16 = std.math.cast(u16, size.x) orelse return error.ImageTooWide;
-
-    var it = image.iterator();
-
-    var line_index: usize = 0;
-    while (line_index < size.y) : (line_index += 1) {
-        try sendLine(
-            sock,
-            image_format,
-            ids.window(),
-            ids.fg_gc(),
-            0,
-            // TODO: is this cast ok?
-            @intCast(i16, line_index),
-            width_u16,
-            &it,
-            put_image_line_msg,
-        );
+    {
+        var msg: [x.copy_area.len]u8 = undefined;
+        x.copy_area.serialize(&msg, .{
+            .src_drawable_id = ids.pixmap(),
+            .dst_drawable_id = ids.window(),
+            .gc_id = ids.fg_gc(),
+            .src_x = 0,
+            .src_y = 0,
+            .dst_x = 0,
+            .dst_y = 0,
+            .width = image_size.x,
+            .height = image_size.y,
+        });
+        try common.send(sock, &msg);
     }
 }
 

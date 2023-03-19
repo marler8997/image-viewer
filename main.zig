@@ -32,7 +32,7 @@ pub fn cmdlineArgs() [][*:0]u8 {
             error.Overflow => @panic("Overflow while parsing command line"),
         };
         const args = windows_args_arena.allocator().alloc([*:0]u8, slices.len - 1) catch |e| oom(e);
-        for (slices[1..]) |slice, i| {
+        for (slices[1..], 0..) |slice, i| {
             args[i] = slice.ptr;
         }
         return args;

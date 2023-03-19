@@ -29,7 +29,7 @@ fn getXImageFormat(
     root_depth: u8,
 ) !XImageFormat {
     var opt_match_index: ?usize = null;
-    for (formats) |format, i| {
+    for (formats, 0..) |format, i| {
         if (format.depth == root_depth) {
             if (opt_match_index) |_|
                 return error.MultiplePixmapFormatsSameDepth;
@@ -70,7 +70,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     const format_list_limit = x.ConnectSetup.getFormatListLimit(format_list_offset, fixed.format_count);
     std.log.debug("fmt list off={} limit={}", .{format_list_offset, format_list_limit});
     const formats = try conn.setup.getFormatList(format_list_offset, format_list_limit);
-    for (formats) |format, i| {
+    for (formats, 0..) |format, i| {
         std.log.debug("format[{}] depth={:3} bpp={:3} scanpad={:3}", .{i, format.depth, format.bits_per_pixel, format.scanline_pad});
     }
     const screen = conn.setup.getFirstScreenPtr(format_list_limit);
@@ -258,7 +258,9 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
         }
         while (true) {
             const data = buf.nextReservedBuffer();
-            const msg_len = x.parseMsgLen(@alignCast(4, data));
+            if (data.len < 32)
+                break;
+            const msg_len = x.parseMsgLen(data[0..32].*);
             if (msg_len == 0)
                 break;
             buf.release(msg_len);
@@ -315,6 +317,10 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
                     std.log.info("todo: server msg {}", .{msg});
                     return error.UnhandledServerMsg;
                 },
+                .map_notify,
+                .reparent_notify,
+                .configure_notify,
+                => unreachable, // did not register for structure_notify events
             }
         }
     }

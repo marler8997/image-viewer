@@ -25,18 +25,12 @@ pub fn build(b: *std.build.Builder) void {
         .fetch_enabled = true,
     });
 
-    const zigimg_repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/zigimg/zigimg",
-        .branch = null,
-        .sha = "6d0f7d71a49b19564cf70f07577670f712cfc353",
-        .fetch_enabled = true,
-    });
-
     const build_options = b.addOptions();
     build_options.addOption(bool, "enable_x11_backend", enable_x11_backend);
 
-    const zigimg = b.addModule("zigimg", .{
-        .source_file = .{ .path = b.pathJoin(&.{zigimg_repo.path, "zigimg.zig"}) },
+    const zigimg_dep = b.dependency("zigimg", .{
+        .target = target,
+        .optimize = optimize,
     });
     const zigx = b.addModule("x", .{
         .source_file = .{ .path = b.pathJoin(&.{zigx_repo.path, "x.zig"}), },
@@ -54,8 +48,7 @@ pub fn build(b: *std.build.Builder) void {
     });
     exe.addOptions("build_options", build_options);
 
-    exe.step.dependOn(&zigimg_repo.step);
-    exe.addModule("img", zigimg);
+    exe.addModule("img", zigimg_dep.module("zigimg"));
     if (enable_x11_backend) {
         exe.step.dependOn(&zigx_repo.step);
         exe.addModule("x", zigx);

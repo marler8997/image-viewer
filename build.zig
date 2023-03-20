@@ -1,5 +1,4 @@
 const std = @import("std");
-const GitRepoStep = @import("GitRepoStep.zig");
 
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
@@ -11,22 +10,12 @@ pub fn build(b: *std.build.Builder) void {
         break :blk true;
     };
 
-    const zigwin32_repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/marlersoft/zigwin32",
-        .branch = "15.0.2-preview",
-        .sha = "79c0144225dc015a5c0253b5af30356aa6dc6426",
-        .fetch_enabled = true,
-    });
-
     const build_options = b.addOptions();
     build_options.addOption(bool, "enable_x11_backend", enable_x11_backend);
 
     const zigimg_dep = b.dependency("zigimg", .{
         .target = target,
         .optimize = optimize,
-    });
-    const zigwin32 = b.addModule("win32", .{
-        .source_file = .{ .path = b.pathJoin(&.{zigwin32_repo.path, "win32.zig"}), },
     });
 
     //const exe = b.addExecutable("image-viewer", if (is_windows) "win32main.zig" else "main.zig");
@@ -44,9 +33,9 @@ pub fn build(b: *std.build.Builder) void {
         exe.addModule("x", zigx_dep.module("zigx"));
     }
     if (is_windows) {
+        const zigwin32_dep = b.dependency("zigwin32", .{});
+        exe.addModule("win32", zigx_dep.module("zigwin32"));
         exe.subsystem = .Windows;
-        exe.step.dependOn(&zigwin32_repo.step);
-        exe.addModule("win32", zigwin32);
     }
 
     exe.install();

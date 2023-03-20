@@ -11,5 +11,9 @@
             .url = "https://github.com/marler8997/zigx/archive/1f24415f64403e5c891140456cd9500a688a43e2.tar.gz",
             .hash = "1220fc0f342529230d1fa811523fa77c2beee843c64a7a7232cac0a3fbe11a7de885",
         },
+        .zigwin32 = .{
+            .url = "https://github.com/marlersoft/zigwin32/archive/b70e7f818d77a0c0f39b0bd9c549e16439ff5780.tar.gz",
+            .hash = "1220fc0f342529230d1fa811523fa77c2beee843c64a7a7232cac0a3fbe11a7de999",
+        },
     },
 }

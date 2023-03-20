@@ -11,13 +11,6 @@ pub fn build(b: *std.build.Builder) void {
         break :blk true;
     };
 
-    const zigx_repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/marler8997/zigx",
-        .branch = null,
-        .sha = "d229f93eacdb60316f0350657b0950f113f07e8b",
-        .fetch_enabled = true,
-    });
-
     const zigwin32_repo = GitRepoStep.create(b, .{
         .url = "https://github.com/marlersoft/zigwin32",
         .branch = "15.0.2-preview",
@@ -31,9 +24,6 @@ pub fn build(b: *std.build.Builder) void {
     const zigimg_dep = b.dependency("zigimg", .{
         .target = target,
         .optimize = optimize,
-    });
-    const zigx = b.addModule("x", .{
-        .source_file = .{ .path = b.pathJoin(&.{zigx_repo.path, "x.zig"}), },
     });
     const zigwin32 = b.addModule("win32", .{
         .source_file = .{ .path = b.pathJoin(&.{zigwin32_repo.path, "win32.zig"}), },
@@ -50,8 +40,8 @@ pub fn build(b: *std.build.Builder) void {
 
     exe.addModule("img", zigimg_dep.module("zigimg"));
     if (enable_x11_backend) {
-        exe.step.dependOn(&zigx_repo.step);
-        exe.addModule("x", zigx);
+        const zigx_dep = b.dependency("zigx", .{});
+        exe.addModule("x", zigx_dep.module("zigx"));
     }
     if (is_windows) {
         exe.subsystem = .Windows;

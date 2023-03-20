@@ -7,5 +7,9 @@
             .url = "https://github.com/zigimg/zigimg/archive/6d0f7d71a49b19564cf70f07577670f712cfc353.tar.gz",
             .hash = "12205b3e663cbf2666d7ddb35871967adfd0e7e3f7023c39ff8e08c71df48fb6f3e3",
         },
+        .zigx = .{
+            .url = "https://github.com/marler8997/zigx/archive/1f24415f64403e5c891140456cd9500a688a43e2.tar.gz",
+            .hash = "1220fc0f342529230d1fa811523fa77c2beee843c64a7a7232cac0a3fbe11a7de885",
+        },
     },
 }

@@ -4,12 +4,12 @@
 
     .dependencies = .{
         .zigimg = .{
-            .url = "https://github.com/zigimg/zigimg/archive/6d0f7d71a49b19564cf70f07577670f712cfc353.tar.gz",
-            .hash = "12205b3e663cbf2666d7ddb35871967adfd0e7e3f7023c39ff8e08c71df48fb6f3e3",
+            .url = "https://github.com/zigimg/zigimg/archive/dadb374f24f50506c26bf195134cd8873a035a21.tar.gz",
+            .hash = "122054a7b013a28933c7109544b03baf1753071e5ddaffab5ba6910134f96a0b2535",
         },
         .zigx = .{
-            .url = "https://github.com/marler8997/zigx/archive/1f24415f64403e5c891140456cd9500a688a43e2.tar.gz",
-            .hash = "1220fc0f342529230d1fa811523fa77c2beee843c64a7a7232cac0a3fbe11a7de885",
+            .url = "https://github.com/marler8997/zigx/archive/8110389e5704918c5d0b0d3029d404ecf98e536e.tar.gz",
+            .hash = "122035bdd04e67384e59075119edefec54667cd40b86ceb23204e0bd9b66e046b34e",
         },
     },
 }

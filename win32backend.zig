@@ -56,7 +56,7 @@ pub fn go(
 
     const CLASS_NAME = L("ImageViewer");
     const wc = win32.WNDCLASS{
-        .style = @intToEnum(win32.WNDCLASS_STYLES, 0),
+        .style = @enumFromInt(0),
         .lpfnWndProc = WindowProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
@@ -91,7 +91,7 @@ pub fn go(
     };
 
     const hwnd = win32.CreateWindowEx(
-        @intToEnum(win32.WINDOW_EX_STYLE, 0), // Optional window styles.
+        @enumFromInt(0), // Optional window styles.
         CLASS_NAME, // Window class
         // TODO: use the image name in the title if we have one
         L("Image Viewer"),
@@ -107,7 +107,7 @@ pub fn go(
         std.log.err("CreateWindow failed with {}", .{win32.GetLastError()});
         std.os.exit(0xff);
     };
-    _ = win32.ShowWindow(hwnd, @intToEnum(win32.SHOW_WINDOW_CMD, nCmdShow));
+    _ = win32.ShowWindow(hwnd, @enumFromInt(nCmdShow));
 
     var msg: MSG = undefined;
     while (win32.GetMessage(&msg, null, 0, 0) != 0) {
@@ -157,8 +157,8 @@ fn paint(hWnd: HWND) void {
         const bitmap_info = win32.BITMAPINFO{
             .bmiHeader = .{
                 .biSize = @sizeOf(win32.BITMAPINFOHEADER),
-                .biWidth = @intCast(i32, image.width),
-                .biHeight = -@intCast(i32, image.height),
+                .biWidth = @intCast(image.width),
+                .biHeight = -@as(i32, @intCast(image.height)),
                 .biPlanes = 1,
                 .biBitCount = 32,
                 .biCompression = win32.BI_RGB,
@@ -173,7 +173,7 @@ fn paint(hWnd: HWND) void {
         const result = win32.StretchDIBits(
             hdc,
             0, 0, client_rect.right, client_rect.bottom,
-            0, 0, @intCast(i32, image.width), @intCast(i32, image.height),
+            0, 0, @intCast(image.width), @intCast(image.height),
             global.opt_image_rgb32.?.ptr,
             &bitmap_info,
             win32.DIB_RGB_COLORS,
@@ -186,7 +186,7 @@ fn paint(hWnd: HWND) void {
         std.debug.assert(result != 0);
     } else {
         // TODO: paint a message to open a file
-        _ = win32.FillRect(hdc, &ps.rcPaint, @intToPtr(win32.HBRUSH, @as(usize, @enumToInt(win32.COLOR_WINDOW) + 1)));
+        _ = win32.FillRect(hdc, &ps.rcPaint, @ptrFromInt(@as(usize, @intFromEnum(win32.COLOR_WINDOW)) + 1));
     }
 
     _ = win32.EndPaint(hWnd, &ps);

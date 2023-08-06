@@ -176,14 +176,14 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     var buf = double_buf.contiguousReadBuffer();
 
     const font_dims: FontDims = blk: {
-        _ = try x.readOneMsg(conn.reader(), @alignCast(4, buf.nextReadBuffer()));
-        switch (x.serverMsgTaggedUnion(@alignCast(4, buf.double_buffer_ptr))) {
+        _ = try x.readOneMsg(conn.reader(), @alignCast(buf.nextReadBuffer()));
+        switch (x.serverMsgTaggedUnion(@alignCast(buf.double_buffer_ptr))) {
             .reply => |msg_reply| {
-                const msg = @ptrCast(*x.ServerMsg.QueryTextExtents, msg_reply);
+                const msg: *x.ServerMsg.QueryTextExtents = @ptrCast(msg_reply);
                 break :blk .{
-                    .width = @intCast(u8, msg.overall_width),
-                    .height = @intCast(u8, msg.font_ascent + msg.font_descent),
-                    .font_left = @intCast(i16, msg.overall_left),
+                    .width = @intCast(msg.overall_width),
+                    .height = @intCast(msg.font_ascent + msg.font_descent),
+                    .font_left = @intCast(msg.overall_left),
                     .font_ascent = msg.font_ascent,
                 };
             },
@@ -228,7 +228,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
                 ids.fg_gc(),
                 0,
                 // TODO: is this cast ok?
-                @intCast(i16, line_index),
+                @intCast(line_index),
                 image_size_u16.x,
                 &it,
                 put_image_line_msg,
@@ -265,7 +265,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
                 break;
             buf.release(msg_len);
             //buf.resetIfEmpty();
-            switch (x.serverMsgTaggedUnion(@alignCast(4, data.ptr))) {
+            switch (x.serverMsgTaggedUnion(@alignCast(data.ptr))) {
                 .err => |msg| {
                     std.log.err("{}", .{msg});
                     return error.X11Error;
@@ -369,7 +369,7 @@ fn sendLine(
     msg: []u8,
 ) !void {
     const dst_bytes_per_pixel = dst_image_format.bits_per_pixel / 8;
-    const dst_stride = @intCast(u18, std.mem.alignForward(
+    const dst_stride: u18 = @intCast(std.mem.alignForward(
         dst_bytes_per_pixel * width,
         dst_image_format.scanline_pad / 8,
     ));
@@ -391,9 +391,9 @@ fn sendLine(
         var col: u16 = 0;
         while (col < width) : (col += 1) {
             const color_f32 = pixel_it.next().?;
-            const r = @floatToInt(u24, color_f32.r / 1.0 * 0xff) & 0xff;
-            const g = @floatToInt(u24, color_f32.g / 1.0 * 0xff) & 0xff;
-            const b = @floatToInt(u24, color_f32.b / 1.0 * 0xff) & 0xff;
+            const r: u24 = @as(u24, @intFromFloat(color_f32.r / 1.0 * 0xff)) & 0xff;
+            const g: u24 = @as(u24, @intFromFloat(color_f32.g / 1.0 * 0xff)) & 0xff;
+            const b: u24 = @as(u24, @intFromFloat(color_f32.b / 1.0 * 0xff)) & 0xff;
             const color = (r << 16) | (g << 8) | (b << 0);
 
             switch (dst_image_format.depth) {

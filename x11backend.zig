@@ -168,7 +168,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     }
 
     const double_buf = try x.DoubleBuffer.init(
-        std.mem.alignForward(1000, std.mem.page_size),
+        std.mem.alignForward(usize, 1000, std.mem.page_size),
         .{ .memfd_name = "ZigX11DoubleBuffer" },
     );
     defer double_buf.deinit();
@@ -212,6 +212,7 @@ pub fn go(allocator: std.mem.Allocator, opt_image: ?Image) !void {
     {
         const image_bytes_per_pixel = image_format.bits_per_pixel / 8;
         const image_stride = std.mem.alignForward(
+            usize,
             image_bytes_per_pixel * image.width,
             image_format.scanline_pad / 8,
         );
@@ -369,10 +370,11 @@ fn sendLine(
     msg: []u8,
 ) !void {
     const dst_bytes_per_pixel = dst_image_format.bits_per_pixel / 8;
-    const dst_stride: u18 = @intCast(std.mem.alignForward(
+    const dst_stride = std.mem.alignForward(
+        u18,
         dst_bytes_per_pixel * width,
         dst_image_format.scanline_pad / 8,
-    ));
+    );
     std.debug.assert(msg.len == x.put_image.getLen(dst_stride));
     x.put_image.serializeNoDataCopy(msg.ptr, dst_stride, .{
         .format = .z_pixmap,

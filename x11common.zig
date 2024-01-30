@@ -26,10 +26,16 @@ pub const ConnectResult = struct {
 pub fn connect(allocator: std.mem.Allocator) !ConnectResult {
     const display = x.getDisplay();
 
-    const sock = x.connect(display) catch |err| {
+    const parsed_display = x.parseDisplay(display) catch |err| {
+        std.log.err("invalid display '{s}': {s}", .{display, @errorName(err)});
+        std.os.exit(0xff);
+    };
+
+    const sock = x.connect(display, parsed_display) catch |err| {
         std.log.err("failed to connect to display '{s}': {s}", .{display, @errorName(err)});
         std.os.exit(0xff);
     };
+    errdefer x.disconnect(sock);
 
     {
         const len = comptime x.connect_setup.getLen(0, 0);

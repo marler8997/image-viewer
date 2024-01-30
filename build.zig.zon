@@ -8,8 +8,8 @@
             .hash = "12208c69b00540fe3f38893800fb6c89a9fe27b4a687de5d0462e498a43db4caeec0",
         },
         .zigx = .{
-            .url = "https://github.com/marler8997/zigx/archive/9a8423d279cf3f9bd1f8f5f5ca4817e750ea7679.tar.gz",
-            .hash = "122021bc5fd19c5085c32380c96e2383faf967d8d17f7b9972268b4f28bc1766dba1",
+            .url = "https://github.com/marler8997/zigx/archive/5dd695270862619f1a7a2457c4e61295cc9d96de.tar.gz",
+            .hash = "1220c7a45bd3e3aee922fa79187d6f5876925f11cc6af40af7f2c9331dfed39f76da",
         },
     },
 }

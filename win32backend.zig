@@ -75,7 +75,7 @@ pub fn go(
 
     const window_style = win32.WS_OVERLAPPEDWINDOW;
     const size: XY(i32) = blk: {
-        const default = XY(i32){ .x = CW_USEDEFAULT, .y = CW_USEDEFAULT };
+        const default = XY(i32){ .x = 400, .y = 200 };
         const image = opt_image orelse break :blk default;
         var client_rect: win32.RECT = undefined;
         client_rect = .{
@@ -141,17 +141,24 @@ fn WindowProc(
     return win32.DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
+fn getClientSize(hWnd: HWND) win32.SIZE {
+    var client_rect: win32.RECT = undefined;
+    std.debug.assert(0 != win32.GetClientRect(hWnd, &client_rect));
+    return .{
+        .cx = client_rect.right - client_rect.left,
+        .cy = client_rect.bottom - client_rect.top,
+    };
+}
+
 fn paint(hWnd: HWND) void {
     var ps: win32.PAINTSTRUCT = undefined;
     const hdc = win32.BeginPaint(hWnd, &ps);
 
+    const client_size = getClientSize(hWnd);
+
     if (global.opt_image) |image| {
-        var client_rect: win32.RECT = undefined;
-        std.debug.assert(0 != win32.GetClientRect(hWnd, &client_rect));
-        std.debug.assert(0 == client_rect.left);
-        std.debug.assert(0 == client_rect.top);
         std.log.info("PAINT! client rect {}x{} image {}x{}", .{
-            client_rect.right, client_rect.bottom,
+            client_size.cx, client_size.cy,
             image.width, image.height,
         });
         const bitmap_info = win32.BITMAPINFO{
@@ -172,7 +179,7 @@ fn paint(hWnd: HWND) void {
         };
         const result = win32.StretchDIBits(
             hdc,
-            0, 0, client_rect.right, client_rect.bottom,
+            0, 0, client_size.cx, client_size.cy,
             0, 0, @intCast(image.width), @intCast(image.height),
             global.opt_image_rgb32.?.ptr,
             &bitmap_info,
@@ -181,12 +188,22 @@ fn paint(hWnd: HWND) void {
         );
         if (result == 0)
             std.debug.panic("StretchDIBits failed with {}", .{win32.GetLastError()});
-        //std.debug.assert(result == client_rect.bottom);
+        //std.debug.assert(result == client_size.cx);
         std.log.info("result is {}", .{result});
         std.debug.assert(result != 0);
     } else {
-        // TODO: paint a message to open a file
         _ = win32.FillRect(hdc, &ps.rcPaint, @ptrFromInt(@as(usize, @intFromEnum(win32.COLOR_WINDOW)) + 1));
+
+        const msg = "Please provide a file on the command-line.";
+        {
+            var size: win32.SIZE = undefined;
+            std.debug.assert(0 != win32.GetTextExtentPoint32A(
+                hdc, @ptrCast(msg.ptr), msg.len, &size
+            ));
+            const x = @divTrunc(client_size.cx - size.cx, 2);
+            const y = @divTrunc(client_size.cy - size.cy, 2);
+            _ = win32.TextOutA(hdc, x, y, @ptrCast(msg.ptr), msg.len);
+        }
     }
 
     _ = win32.EndPaint(hWnd, &ps);

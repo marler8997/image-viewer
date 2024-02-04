@@ -6,9 +6,20 @@ const win32 = struct {
     usingnamespace @import("win32").foundation;
     usingnamespace @import("win32").system.library_loader;
     usingnamespace @import("win32").system.system_services;
+    usingnamespace @import("win32").ui.hi_dpi;
     usingnamespace @import("win32").ui.input.keyboard_and_mouse;
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").graphics.gdi;
+};
+const win32fix = struct {
+    pub extern "user32" fn LoadImageW(
+        hInst: ?win32.HINSTANCE,
+        name: ?[*:0]const align(1) u16,
+        type: win32.GDI_IMAGE_TYPE,
+        cx: i32,
+        cy: i32,
+        flags: win32.IMAGE_FLAGS,
+    ) callconv(@import("std").os.windows.WINAPI) ?win32.HANDLE;
 };
 const L = win32.L;
 const HINSTANCE = win32.HINSTANCE;
@@ -146,25 +157,89 @@ pub fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.os.exit(0xff);
 }
 
+const ID_ICON_IMAGE_VIEWER = 1;
+
+const Icons = struct {
+    small: ?win32.HICON,
+    large: ?win32.HICON,
+};
+fn getIcons() Icons {
+    const size_small = XY(i32){
+        .x = win32.GetSystemMetrics(win32.SM_CXSMICON),
+        .y = win32.GetSystemMetrics(win32.SM_CYSMICON)
+    };
+    const size_large = XY(i32){
+        .x = win32.GetSystemMetrics(win32.SM_CXICON),
+        .y = win32.GetSystemMetrics(win32.SM_CYICON)
+    };
+    const small = win32fix.LoadImageW(
+        win32.GetModuleHandle(null),
+        @ptrFromInt(ID_ICON_IMAGE_VIEWER),
+        .ICON,
+        size_small.x,
+        size_small.y,
+        win32.IMAGE_FLAGS.initFlags(.{ .DEFAULTCOLOR=1, .SHARED=1 }),
+    );
+    if (small == null) {
+        std.log.err("LoadImage for small icon failed, error={}", .{win32.GetLastError()});
+        // not a critical error
+    }
+    const large = win32fix.LoadImageW(
+        win32.GetModuleHandle(null),
+        @ptrFromInt(ID_ICON_IMAGE_VIEWER),
+        .ICON,
+        size_large.x,
+        size_large.y,
+        win32.IMAGE_FLAGS.initFlags(.{ .DEFAULTCOLOR=1, .SHARED=1 }),
+    );
+    if (large == null) {
+        std.log.err("LoadImage for large icon failed, error={}", .{win32.GetLastError()});
+        // not a critical error
+    }
+    return .{
+        .small = @ptrCast(small),
+        .large = @ptrCast(large),
+    };
+}
+
 pub fn go(maybe_filename: ?[]const u8) !void {
     if (maybe_filename) |filename| {
         global.state.loadImage(filename);
     }
 
+    // See https://gist.github.com/marler8997/9f39458d26e2d8521d48e36530fbb459
+    // for notes about windows DPI scaling.
+//    {
+//        var dpi_awareness: win32.PROCESS_DPI_AWARENESS = undefined;
+//        {
+//            const result = win32.GetProcessDpiAwareness(null, &dpi_awareness);
+//            if (result != 0)
+//                fatal("GetProcessDpiAwareness failed, error={}", .{result});
+//        }
+//        if (dpi_awareness != win32.PROCESS_PER_MONITOR_DPI_AWARE)
+//            // We'll just exit for now until we see if this is possible
+//            // it *might* be possible on older versions of windows
+//            fatal("unexpected dpi awareness {}", dpi_awareness);
+//    }
+
+    const icons = getIcons();
+
     const CLASS_NAME = L("ImageViewer");
-    const wc = win32.WNDCLASS{
+    const wc = win32.WNDCLASSEXW{
+        .cbSize = @sizeOf(win32.WNDCLASSEXW),
         .style = @enumFromInt(0),
         .lpfnWndProc = WindowProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
         .hInstance = win32.GetModuleHandle(null),
-        .hIcon = null,
+        .hIcon = icons.large,
+        .hIconSm = icons.small,
         .hCursor = null,
         .hbrBackground = null,
         .lpszMenuName = null,
         .lpszClassName = CLASS_NAME,
     };
-    const class_id = win32.RegisterClass(&wc);
+    const class_id = win32.RegisterClassExW(&wc);
     if (class_id == 0) {
         std.log.err("RegisterClass failed, error={}", .{win32.GetLastError()});
         std.os.exit(0xff);

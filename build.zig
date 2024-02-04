@@ -28,6 +28,8 @@ pub fn build(b: *std.build.Builder) void {
     const zigwin32 = b.addModule("win32", .{
         .source_file = .{ .path = b.pathJoin(&.{zigwin32_repo.path, "win32.zig"}), },
     });
+    const resinator_dep = b.dependency("resinator", .{});
+    const resinator = resinator_dep.artifact("resinator");
 
     //const exe = b.addExecutable("image-viewer", if (is_windows) "win32main.zig" else "main.zig");
     const exe = b.addExecutable(.{
@@ -47,6 +49,18 @@ pub fn build(b: *std.build.Builder) void {
         exe.subsystem = .Windows;
         exe.step.dependOn(&zigwin32_repo.step);
         exe.addModule("win32", zigwin32);
+
+        {
+            const compile_res = b.addRunArtifact(resinator);
+            // end of resinator options so it doesn't see absolute paths as options
+            compile_res.addArg("--");
+            compile_res.addFileArg(.{ .path = "res/image-viewer.rc" });
+            const res = compile_res.addOutputFileArg("image-viewer.res");
+            exe.step.dependOn(&compile_res.step);
+            exe.link_objects.append(.{
+                .static_path = res,
+            }) catch unreachable;
+        }
     }
 
     b.installArtifact(exe);

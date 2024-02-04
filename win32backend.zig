@@ -8,6 +8,7 @@ const win32 = struct {
     usingnamespace @import("win32").system.system_services;
     usingnamespace @import("win32").ui.hi_dpi;
     usingnamespace @import("win32").ui.input.keyboard_and_mouse;
+    usingnamespace @import("win32").ui.shell;
     usingnamespace @import("win32").ui.windows_and_messaging;
     usingnamespace @import("win32").graphics.gdi;
 };
@@ -141,9 +142,13 @@ const global = struct {
     pub var state: State = .no_file;
 };
 
+fn msgBoxA(msg: [*:0]const u8) void {
+    _ = win32.MessageBoxA(null, msg, "Image Viewer", win32.MB_OK);
+}
+
 fn oom(e: error{OutOfMemory}) noreturn {
     std.log.err("{s}", .{@errorName(e)});
-    _ = win32.MessageBoxA(null, "Out of memory", "Med Error", win32.MB_OK);
+    msgBoxA("Out of memory");
     std.os.exit(0xff);
 }
 pub fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -152,8 +157,7 @@ pub fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     //       if there is not a console
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const msg = std.fmt.allocPrintZ(arena.allocator(), fmt, args) catch @panic("Out of memory");
-    const result = win32.MessageBoxA(null, msg.ptr, null, win32.MB_OK);
-    std.log.info("MessageBox result is {}", .{result});
+    msgBoxA(msg.ptr);
     std.os.exit(0xff);
 }
 
@@ -253,7 +257,7 @@ pub fn go(maybe_filename: ?[]const u8) !void {
     }
 
     const hwnd = win32.CreateWindowEx(
-        @enumFromInt(0), // Optional window styles.
+        win32.WINDOW_EX_STYLE.initFlags(.{ .ACCEPTFILES = 1 }),
         CLASS_NAME, // Window class
         // TODO: use the image name in the title if we have one
         L("Image Viewer"),
@@ -392,6 +396,10 @@ fn WindowProc(
             paint(hWnd);
             return 0;
         },
+        win32.WM_DROPFILES => {
+            onDragDrop(hWnd, @ptrFromInt(wParam));
+            return 0;
+        },
         win32.WM_SIZE => {
             // since we "stretch" the image accross the full window, we
             // always invalidate the full client area on each window resize
@@ -409,6 +417,46 @@ fn getClientSize(hWnd: HWND) win32.SIZE {
         .cx = client_rect.right - client_rect.left,
         .cy = client_rect.bottom - client_rect.top,
     };
+}
+
+fn onDragDrop(hWnd: HWND, hDrop: win32.HDROP) void {
+    defer win32.DragFinish(hDrop);
+
+    {
+        const file_count = win32.DragQueryFileA(hDrop, 0xffffffff, null, 0);
+        if (file_count == 0) {
+            msgBoxA("Drag and Dropping 0 files... is this possible?");
+            return;
+        }
+        if (file_count > 1) {
+            msgBoxA("Drag and Dropping multiple files is not supported.");
+            return;
+        }
+    }
+
+    const filename_len = win32.DragQueryFileA(hDrop, 0, null, 0);
+    if (filename_len == 0) {
+        var msg_buf: [100]u8 = undefined;
+        const msg = std.fmt.bufPrintZ(
+            &msg_buf,
+            "DragQueryFile to get file size failed with {s}",
+            .{@tagName(win32.GetLastError())},
+        ) catch |e| switch (e) {
+            error.NoSpaceLeft => unreachable,
+        };
+        msgBoxA(msg);
+        return;
+    }
+    const filename = global.gpa.allocSentinel(u8, filename_len, 0) catch |e| oom(e);
+    defer global.gpa.free(filename);
+    {
+        const len2 = win32.DragQueryFileA(hDrop, 0, filename.ptr, filename_len + 1);
+        if (len2 != filename_len) @panic("codebug");
+    }
+
+    global.state.loadImage(filename);
+    std.debug.assert(0 != win32.InvalidateRect(hWnd, null, 0));
+    std.log.warn("TODO: adjust window dimensions to the new aspect ratio!", .{});
 }
 
 fn paint(hWnd: HWND) void {
@@ -459,7 +507,7 @@ fn paint(hWnd: HWND) void {
             if (result == 0)
                 std.debug.panic("StretchDIBits failed with {}", .{win32.GetLastError()});
             //std.debug.assert(result == client_size.cx);
-            std.log.info("result is {}", .{result});
+            //std.log.info("result is {}", .{result});
             std.debug.assert(result != 0);
         },
     }

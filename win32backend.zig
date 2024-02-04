@@ -157,6 +157,13 @@ pub fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.os.exit(0xff);
 }
 
+fn getWindowDpi(hWnd: HWND) u32 {
+    const dpi = win32.GetDpiForWindow(hWnd);
+    // is this possible?
+    if (dpi == 0) fatal("GetDpiForWindow failed, error={}", .{win32.GetLastError()});
+    return dpi;
+}
+
 const ID_ICON_IMAGE_VIEWER = 1;
 
 const Icons = struct {
@@ -262,8 +269,10 @@ pub fn go(maybe_filename: ?[]const u8) !void {
         std.os.exit(0xff);
     };
 
+    const dpi = getWindowDpi(hwnd);
+
     {
-        const rect = calcStartWindowRect(hwnd);
+        const rect = calcStartWindowRect(hwnd, dpi);
         if (0 == win32.SetWindowPos(
             hwnd,
             null,
@@ -299,7 +308,16 @@ fn clientToWindowSize(size: XY(i32)) XY(i32) {
     };
 }
 
-fn calcStartWindowRect(hWnd: HWND) win32.RECT {
+fn scaleDpiOnly(comptime T: type, value: T, dpi: u32) T {
+    switch (@typeInfo(T)) {
+        .Int => return @intFromFloat(
+            @as(f32, @floatFromInt(value)) * (@as(f32, @floatFromInt(dpi)) / 96.0)
+        ),
+        else => @compileError("scaleDpiOnly doesn't support type " ++ @typeName(T)),
+    }
+}
+
+fn calcStartWindowRect(hWnd: HWND, dpi: u32) win32.RECT {
     const monitor = win32.MonitorFromWindow(
         hWnd, win32.MONITOR_DEFAULTTOPRIMARY
     ) orelse @panic("unexpected");
@@ -318,8 +336,10 @@ fn calcStartWindowRect(hWnd: HWND) win32.RECT {
     };
 
     const desired_client_size: XY(i32) = switch (global.state) {
-        .no_file => .{ .x = 500, .y = 200 },
-        .err => .{ .x = 500, .y = 200 },
+        .no_file, .err => .{
+            .x = scaleDpiOnly(i32, 500, dpi),
+            .y = scaleDpiOnly(i32, 200, dpi),
+        },
         .loaded => |s| s.size,
     };
     const desired_window_size = clientToWindowSize(desired_client_size);
